@@ -6,13 +6,11 @@ const VIRTUAL_HEIGHT = 288;
 const TILE = 24;
 const COLS = 20;
 const ROWS = 12;
-const FLOOR = '#1a2234';
 const FLOOR_ALT = '#1d2940';
 const WALL = '#303b57';
 const WALL_TOP = '#485575';
 
 const canvas = document.querySelector('#game-canvas');
-const gameWrap = document.querySelector('#game-wrap');
 const resultPanel = document.querySelector('#result-panel');
 const resultTitle = document.querySelector('#result-title');
 const resultKicker = document.querySelector('#result-kicker');
@@ -25,6 +23,7 @@ const threatValue = document.querySelector('#threat-value');
 const missionStatus = document.querySelector('#mission-status');
 const coinStatus = document.querySelector('#coin-status');
 const exitStatus = document.querySelector('#exit-status');
+const REQUIRED_CORES = 3;
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
 renderer.setPixelRatio(1);
@@ -249,7 +248,9 @@ function facingVector() {
 }
 
 function startAudio() {
-  if (!window.__pixelAudio) window.__pixelAudio = new AudioContext();
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+  if (!window.__pixelAudio) window.__pixelAudio = new AudioContextClass();
   if (window.__pixelAudio.state === 'suspended') window.__pixelAudio.resume();
 }
 
@@ -284,8 +285,8 @@ function attack() {
     const dx = enemy.x - state.player.x;
     const dy = enemy.y - state.player.y;
     const distance = Math.hypot(dx, dy);
-    const inFront = (fx && Math.sign(dx) === fx) || (fy && Math.sign(dy) === fy);
-    if (distance < 42 && inFront) {
+    const facingDot = distance === 0 ? 1 : (dx * fx + dy * fy) / distance;
+    if (distance < 42 && facingDot > 0.35) {
       enemy.hp -= 1;
       enemy.flash = 0.16;
       spawnBurst(enemy.x, enemy.y, '#f4c95d', 4);
@@ -338,6 +339,29 @@ function updatePlayer(delta) {
   state.player.sprite.material.opacity = state.player.invulnerable > 0 && Math.floor(state.time * 20) % 2 ? 0.35 : 1;
 }
 
+function moveEnemyToward(enemy, dx, dy, distance, delta) {
+  const step = enemy.speed * delta;
+  const moveX = (dx / distance) * step;
+  const moveY = (dy / distance) * step;
+  const beforeX = enemy.x;
+  const beforeY = enemy.y;
+  moveEntity(enemy, moveX, moveY, 8);
+  if (enemy.x !== beforeX || enemy.y !== beforeY) return;
+
+  const alternatives = [
+    [Math.sign(dx) * step, 0],
+    [0, Math.sign(dy) * step],
+    [0, Math.sign(dx) * step],
+    [Math.sign(dy) * step, 0],
+  ];
+  for (const [alternativeX, alternativeY] of alternatives) {
+    const candidateX = enemy.x;
+    const candidateY = enemy.y;
+    moveEntity(enemy, alternativeX, alternativeY, 8);
+    if (enemy.x !== candidateX || enemy.y !== candidateY) break;
+  }
+}
+
 function updateEnemies(delta) {
   state.enemies.forEach((enemy) => {
     if (!enemy.alive) return;
@@ -346,7 +370,7 @@ function updateEnemies(delta) {
     const dx = state.player.x - enemy.x;
     const dy = state.player.y - enemy.y;
     const distance = Math.hypot(dx, dy);
-    if (distance > 24) moveEntity(enemy, (dx / distance) * enemy.speed * delta, (dy / distance) * enemy.speed * delta, 8);
+    if (distance > 24) moveEnemyToward(enemy, dx, dy, distance, delta);
     if (distance < 21 && enemy.hitCooldown <= 0) { enemy.hitCooldown = 0.8; damagePlayer(12); }
     enemy.sprite.position.copy(screenPosition(enemy.x, enemy.y + Math.sin(state.time * 6 + enemy.x) * 1.2, 3));
     enemy.sprite.material.opacity = enemy.flash > 0 ? 0.35 : 1;
@@ -370,8 +394,16 @@ function updateCoins(delta) {
   });
 }
 
+function getLiveEnemyCount() {
+  return state.enemies.filter((enemy) => enemy.alive).length;
+}
+
+function isExitUnlocked() {
+  return getLiveEnemyCount() === 0 && state.coins >= REQUIRED_CORES;
+}
+
 function updateExit(delta) {
-  const unlocked = state.enemies.filter((enemy) => enemy.alive).length === 0;
+  const unlocked = isExitUnlocked();
   state.exit.pulse += delta * 4;
   state.exit.sprite.position.copy(screenPosition(state.exit.x, state.exit.y + Math.sin(state.exit.pulse) * 2, 2));
   state.exit.sprite.material.opacity = unlocked ? 0.75 + Math.sin(state.exit.pulse) * 0.2 : 0.25;
@@ -393,26 +425,27 @@ function finishRun(won) {
   if (state.mode !== 'playing') return;
   state.mode = won ? 'won' : 'lost';
   resultPanel.classList.remove('hidden');
-  resultKicker.textContent = won ? 'RUN COMPLETE' : 'SIGNAL LOST';
-  resultTitle.textContent = won ? 'SECTOR CLEARED' : 'RUN TERMINATED';
-  resultCopy.textContent = won ? `出口已开启。你带回了 ${state.coins} 枚信号核心，得分 ${state.score}。` : '护盾耗尽。按 R 或点击下方按钮重新进入扇区。';
-  runState.textContent = won ? 'SECTOR CLEAR' : 'RUN ENDED';
+  resultKicker.textContent = won ? '行动完成' : '信号中断';
+  resultTitle.textContent = won ? '扇区已清除' : '行动失败';
+  resultCopy.textContent = won ? `出口已开启。你带回了 ${state.coins} 枚信号核心，得分 ${state.score}。` : '护盾耗尽。按 R 或点击按钮重新进入扇区。';
+  runState.textContent = won ? '扇区完成' : '行动结束';
   document.querySelector('.run-dot').style.background = won ? '#65e6d0' : '#ff6f61';
   beep(won ? 740 : 60, 0.28, 'square', 0.045);
 }
 
 function syncHud() {
-  const liveEnemies = state.enemies.filter((enemy) => enemy.alive).length;
+  const liveEnemies = getLiveEnemyCount();
   const health = Math.round(state.player.hp);
   healthFill.style.width = `${health}%`;
   healthValue.textContent = String(health).padStart(3, '0');
   coinValue.textContent = String(state.coins).padStart(3, '0');
   threatValue.textContent = String(liveEnemies).padStart(2, '0');
-  missionStatus.textContent = liveEnemies ? 'OPEN' : 'CLEAR';
+  missionStatus.textContent = liveEnemies ? '进行中' : '完成';
   missionStatus.style.color = liveEnemies ? 'var(--cyan)' : 'var(--yellow)';
-  coinStatus.textContent = `${state.coins} / 3`;
-  exitStatus.textContent = liveEnemies ? 'LOCKED' : 'OPEN';
-  exitStatus.classList.toggle('locked', Boolean(liveEnemies));
+  coinStatus.textContent = `${state.coins} / ${REQUIRED_CORES}`;
+  const coresMissing = Math.max(0, REQUIRED_CORES - state.coins);
+  exitStatus.textContent = liveEnemies ? '先清敌人' : coresMissing ? `还差 ${coresMissing}` : '开放';
+  exitStatus.classList.toggle('locked', !isExitUnlocked());
 }
 
 function restart() {

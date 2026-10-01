@@ -11,8 +11,8 @@
   --cyan: #65e6d0;
   --yellow: #f4c95d;
   --coral: #ff6f61;
-  --pixel-font: 'Press Start 2P', monospace;
-  --mono-font: 'Space Mono', monospace;
+  --pixel-font: 'Press Start 2P', 'PingFang SC', 'Microsoft YaHei', monospace;
+  --mono-font: 'Space Mono', 'PingFang SC', 'Microsoft YaHei', monospace;
 }
 
 * { box-sizing: border-box; }
@@ -53,7 +53,7 @@ button { font: inherit; }
 .eyebrow, .section-label, .game-hint, .run-chip, .panel-footer, .mission-status, .input-row, .result-kicker {
   font-family: var(--mono-font);
   font-size: 10px;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -94,7 +94,8 @@ h1 span { color: var(--yellow); }
   position: absolute;
   left: 14px;
   bottom: 12px;
-  color: rgba(255, 255, 255, 0.52);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.64);
   text-shadow: 1px 1px 0 #0b0f1a;
 }
 
@@ -116,14 +117,14 @@ h1 span { color: var(--yellow); }
 .result-panel.hidden { display: none; }
 .result-kicker { margin: 0 0 17px; color: var(--cyan); }
 .result-panel h2 { margin: 0; font-size: clamp(18px, 3vw, 30px); color: var(--yellow); }
-.result-panel p:not(.result-kicker) { max-width: 420px; margin: 18px 0 22px; color: #bbc2d0; font-size: 13px; line-height: 1.6; }
+.result-panel p:not(.result-kicker) { max-width: 420px; margin: 18px 0 22px; color: #bbc2d0; font-size: 14px; line-height: 1.7; }
 
 .primary-button, .attack-button {
   border: 1px solid var(--yellow);
   color: #19150a;
   background: var(--yellow);
   cursor: pointer;
-  font-family: var(--pixel-font);
+  font-family: var(--mono-font);
   font-size: 10px;
   padding: 13px 15px;
   transition: transform 120ms ease, background 120ms ease;
@@ -151,7 +152,7 @@ h1 span { color: var(--yellow); }
 .mission-line { display: grid; grid-template-columns: 24px 1fr auto; gap: 10px; align-items: center; min-height: 34px; border-bottom: 1px solid #1c2434; }
 .mission-line:last-child { border-bottom: 0; }
 .mission-index { color: #4c5a76; font-size: 10px; }
-.mission-line p { margin: 0; color: #ccd2de; font-size: 11px; }
+.mission-line p { margin: 0; color: #ccd2de; font-size: 12px; }
 .mission-status { color: var(--cyan); font-size: 8px; white-space: nowrap; }
 .mission-status.locked { color: var(--muted); }
 
