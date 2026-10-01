@@ -3,72 +3,67 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0b0f1a" />
-    <title>地牢 01 // 像素协议</title>
+    <meta name="theme-color" content="#172725" />
+    <title>林野疾行 // 手绘奇境</title>
   </head>
   <body>
     <main class="app-shell">
-      <section class="game-column" aria-label="像素地牢游戏">
+      <section class="game-column" aria-label="林野疾行跑酷游戏">
         <div class="game-header">
           <div>
-            <p class="eyebrow">扇区 01 / 夜班协议</p>
-            <h1>地牢 <span>//</span> 01</h1>
+            <p class="eyebrow">自然奇幻 / 路线 01</p>
+            <h1>林野疾行 <span>//</span> 01</h1>
+            <p class="subtitle">沿着风的方向，穿过会发光的森林。</p>
           </div>
-          <div class="run-chip"><span class="run-dot"></span><span id="run-state">行动中</span></div>
+          <div class="run-chip"><span class="run-dot"></span><span id="run-state">奔跑中</span></div>
         </div>
 
         <div id="game-wrap" class="game-wrap">
-          <canvas id="game-canvas" aria-label="像素地牢游戏画布"></canvas>
+          <canvas id="game-canvas" aria-label="林野疾行游戏画布"></canvas>
           <div class="screen-vignette"></div>
           <div id="result-panel" class="result-panel hidden" role="status" aria-live="polite">
-            <p class="result-kicker" id="result-kicker">行动完成</p>
-            <h2 id="result-title">扇区已清除</h2>
-            <p id="result-copy">所有敌人已清除。出口已经解锁。</p>
-            <button id="restart-button" class="primary-button" type="button">重新开始 <span>↵</span></button>
+            <p class="result-kicker" id="result-kicker">旅程完成</p>
+            <h2 id="result-title">抵达山谷</h2>
+            <p id="result-copy">风把你带到了森林尽头。</p>
+            <button id="restart-button" class="primary-button" type="button">再来一次 <span>↵</span></button>
           </div>
-          <div class="game-hint">移动 <b>WASD</b> / <b>方向键</b><span></span>攻击 <b>空格</b></div>
         </div>
 
         <div class="touch-controls" aria-label="触控操作">
-          <div class="d-pad">
-            <button class="control-button up" data-dir="up" aria-label="向上移动"></button>
-            <button class="control-button left" data-dir="left" aria-label="向左移动"></button>
-            <button class="control-button down" data-dir="down" aria-label="向下移动"></button>
-            <button class="control-button right" data-dir="right" aria-label="向右移动"></button>
-          </div>
-          <button id="touch-attack" class="attack-button" type="button" aria-label="攻击"><span class="attack-mark">+</span><span>攻击</span></button>
+          <button id="touch-jump" class="control-button jump" type="button" title="跳跃" aria-label="跳跃"><span>↟</span></button>
+          <button id="touch-slide" class="control-button slide" type="button" title="滑铲" aria-label="滑铲"><span>⌁</span></button>
         </div>
       </section>
 
       <aside class="side-panel" aria-label="游戏信息">
         <div class="panel-block status-block">
-          <div class="section-label"><span>玩家状态</span><span class="section-code">00A</span></div>
+          <div class="section-label"><span>旅人状态</span><span class="section-code">01A</span></div>
           <div class="health-row">
-            <div class="health-icon">+</div>
+            <div class="health-icon">♥</div>
             <div class="health-track"><div id="health-fill" class="health-fill"></div></div>
-            <strong id="health-value">100</strong>
+            <strong id="health-value">3</strong>
           </div>
           <div class="stat-grid">
-            <div><span>核心</span><strong id="coin-value">000</strong></div>
-            <div><span>威胁</span><strong id="threat-value">03</strong></div>
+            <div><span>里程</span><strong id="distance-value">000m</strong></div>
+            <div><span>星火</span><strong id="star-value">000</strong></div>
           </div>
+          <div class="progress-track"><div id="distance-fill" class="distance-fill"></div></div>
         </div>
 
         <div class="panel-block objective-block">
-          <div class="section-label"><span>任务日志</span><span class="section-code">01</span></div>
-          <div class="mission-line"><span class="mission-index">01</span><p>清除扇区敌人</p><span id="mission-status" class="mission-status">进行中</span></div>
-          <div class="mission-line"><span class="mission-index">02</span><p>收集信号核心</p><span id="coin-status" class="mission-status">0 / 3</span></div>
-          <div class="mission-line"><span class="mission-index">03</span><p>抵达出口</p><span id="exit-status" class="mission-status locked">锁定</span></div>
+          <div class="section-label"><span>旅途手记</span><span class="section-code">01</span></div>
+          <div class="mission-line"><span class="mission-index">01</span><p>跑过林间小路</p><span id="mission-status" class="mission-status">进行中</span></div>
+          <div class="mission-line"><span class="mission-index">02</span><p>收集萤火</p><span id="star-status" class="mission-status">0 / 8</span></div>
+          <div class="mission-line"><span class="mission-index">03</span><p>抵达山谷</p><span id="exit-status" class="mission-status">0%</span></div>
         </div>
 
-        <div class="panel-block controls-block">
-          <div class="section-label"><span>操作说明</span><span class="section-code">按键</span></div>
-          <div class="input-row"><span class="keycap">W</span><span class="keycap">A</span><span class="keycap">S</span><span class="keycap">D</span><span>移动</span></div>
-          <div class="input-row"><span class="keycap wide">空格</span><span>攻击</span></div>
-          <div class="input-row muted"><span class="keycap">R</span><span>结算后重启</span></div>
+        <div class="panel-block mood-block">
+          <div class="section-label"><span>今日天气</span><span class="section-code">晴</span></div>
+          <p class="mood-copy">风很轻，云在山背后慢慢移动。前方有一条被阳光照亮的小路。</p>
+          <div class="mood-line"><span class="mood-dot sun"></span><span>暖日</span><span class="mood-dot leaf"></span><span>微风</span><span class="mood-dot firefly"></span><span>星火</span></div>
         </div>
 
-        <div class="panel-footer"><span>版本 1.0.0</span><span>THREE.JS / 像素模式</span></div>
+        <div class="panel-footer"><span>版本 2.0.0</span><span>THREE.JS / 林野模式</span></div>
       </aside>
     </main>
     <script type="importmap">

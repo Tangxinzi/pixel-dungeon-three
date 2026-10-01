@@ -1,14 +1,12 @@
 import * as THREE from 'three';
 import './style.css';
 
-const VIRTUAL_WIDTH = 480;
-const VIRTUAL_HEIGHT = 288;
-const TILE = 24;
-const COLS = 20;
-const ROWS = 12;
-const FLOOR_ALT = '#1d2940';
-const WALL = '#303b57';
-const WALL_TOP = '#485575';
+const WIDTH = 640;
+const HEIGHT = 360;
+const GROUND_Y = 286;
+const RUN_LENGTH = 2800;
+const STAR_TARGET = 8;
+const PLAYER_X = 142;
 
 const canvas = document.querySelector('#game-canvas');
 const resultPanel = document.querySelector('#result-panel');
@@ -18,483 +16,256 @@ const resultCopy = document.querySelector('#result-copy');
 const runState = document.querySelector('#run-state');
 const healthFill = document.querySelector('#health-fill');
 const healthValue = document.querySelector('#health-value');
-const coinValue = document.querySelector('#coin-value');
-const threatValue = document.querySelector('#threat-value');
+const distanceValue = document.querySelector('#distance-value');
+const distanceFill = document.querySelector('#distance-fill');
+const starValue = document.querySelector('#star-value');
 const missionStatus = document.querySelector('#mission-status');
-const coinStatus = document.querySelector('#coin-status');
+const starStatus = document.querySelector('#star-status');
 const exitStatus = document.querySelector('#exit-status');
-const REQUIRED_CORES = 3;
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
 renderer.setPixelRatio(1);
-renderer.setSize(VIRTUAL_WIDTH, VIRTUAL_HEIGHT, false);
+renderer.setSize(WIDTH, HEIGHT, false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.domElement.style.imageRendering = 'pixelated';
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#0b0f1a');
-const camera = new THREE.OrthographicCamera(0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, 0, 0.1, 100);
+scene.background = new THREE.Color('#a4d4cb');
+const camera = new THREE.OrthographicCamera(0, WIDTH, HEIGHT, 0, 0.1, 100);
 camera.position.z = 10;
 
-const clock = new THREE.Clock();
 const world = new THREE.Group();
 scene.add(world);
-
-const blockedCells = new Set([
-  '4,3', '4,4', '4,5', '5,5', '6,5',
-  '12,2', '13,2', '14,2', '14,3',
-  '9,8', '10,8', '11,8', '11,7',
-  '16,7', '16,8', '16,9', '15,9',
-]);
+const clock = new THREE.Clock();
 
 const state = {
   mode: 'playing',
   time: 0,
+  distance: 0,
+  speed: 178,
   score: 0,
-  coins: 0,
-  enemiesDefeated: 0,
+  stars: 0,
+  hp: 3,
   keys: new Set(),
-  player: { x: 58, y: 232, hp: 100, maxHp: 100, speed: 90, facing: 'right', attackCooldown: 0, invulnerable: 0, sprite: null, slash: null },
-  enemies: [],
-  coinsOnMap: [],
+  jumpQueued: false,
+  spawnTimer: 0.9,
+  starTimer: 0.35,
+  player: { y: GROUND_Y - 36, vy: 0, grounded: true, sliding: false, invulnerable: 0, animationFrame: -1, sprite: null },
+  obstacles: [],
+  collectibles: [],
   particles: [],
-  exit: null,
+  parallax: [],
+  groundDetails: [],
 };
 
-const palette = {
-  player: { '1': '#101827', '2': '#65e6d0', '3': '#f4c95d', '4': '#f7f1d1' },
-  enemy: { '1': '#241b31', '2': '#ff6f61', '3': '#db3f5b', '4': '#f4c95d' },
-  coin: { '1': '#f4c95d', '2': '#ffe5a3' },
-  exit: { '1': '#131b2c', '2': '#65e6d0', '3': '#c0fff3', '4': '#f4c95d' },
-};
-
-function makePixelTexture(rows, colors, scale = 2) {
-  const size = rows.length;
+function makeTexture(width, height, draw) {
   const bitmap = document.createElement('canvas');
-  bitmap.width = size * scale;
-  bitmap.height = size * scale;
+  bitmap.width = width;
+  bitmap.height = height;
   const context = bitmap.getContext('2d');
-  context.imageSmoothingEnabled = false;
-  rows.forEach((row, y) => [...row].forEach((cell, x) => {
-    if (cell !== '.' && colors[cell]) {
-      context.fillStyle = colors[cell];
-      context.fillRect(x * scale, y * scale, scale, scale);
-    }
-  }));
+  context.imageSmoothingEnabled = true;
+  draw(context, width, height);
   const texture = new THREE.CanvasTexture(bitmap);
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
 }
 
-const textures = {
-  player: makePixelTexture([
-    '....1111....',
-    '...122221...',
-    '..12222221..',
-    '..12244221..',
-    '..12222221..',
-    '...122221...',
-    '..13333331..',
-    '.1133333311.',
-    '.1123333211.',
-    '..12222221..',
-    '..12222221..',
-    '..11....11..',
-  ], palette.player),
-  enemy: makePixelTexture([
-    '....1111....',
-    '...122221...',
-    '..12222221..',
-    '.1224442221.',
-    '.1222222221.',
-    '.1122222211.',
-    '..13333331..',
-    '..13333331..',
-    '.1133333311.',
-    '.11.3333.11.',
-    '....1111....',
-    '...11..11...',
-  ], palette.enemy),
-  coin: makePixelTexture([
-    '...11...',
-    '..1221..',
-    '.122221.',
-    '.122221.',
-    '.122221.',
-    '..1221..',
-    '...11...',
-  ], palette.coin),
-  exit: makePixelTexture([
-    '...1111...',
-    '..122221..',
-    '.12222221.',
-    '.12233221.',
-    '1223344221',
-    '1223344221',
-    '.12233221.',
-    '.12222221.',
-    '..122221..',
-    '...1111...',
-  ], palette.exit),
-};
-
 function rect(x, y, width, height, color, z = 0) {
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ color }));
-  mesh.position.set(x + width / 2, VIRTUAL_HEIGHT - (y + height / 2), z);
+  mesh.position.set(x + width / 2, HEIGHT - (y + height / 2), z);
   world.add(mesh);
   return mesh;
 }
 
-function screenPosition(x, y, z = 2) { return new THREE.Vector3(x, VIRTUAL_HEIGHT - y, z); }
-
-function createSprite(texture, width, height, x, y, z = 3) {
+function createSprite(texture, width, height, x, y, z = 2) {
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }));
   sprite.scale.set(width, height, 1);
-  sprite.position.copy(screenPosition(x, y, z));
+  sprite.position.set(x + width / 2, HEIGHT - (y + height / 2), z);
   world.add(sprite);
   return sprite;
 }
 
-function buildMap() {
-  rect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, '#111829', -1);
-  for (let row = 0; row < ROWS; row += 1) {
-    for (let col = 0; col < COLS; col += 1) {
-      const cellKey = `${col},${row}`;
-      const x = col * TILE;
-      const y = row * TILE;
-      if (blockedCells.has(cellKey)) {
-        rect(x, y, TILE, TILE, WALL, 0);
-        rect(x + 3, y + 3, TILE - 6, 5, WALL_TOP, 0.2);
-      } else {
-        rect(x, y, TILE, TILE, (col + row) % 2 ? FLOOR : FLOOR_ALT, 0);
-        rect(x + 1, y + TILE - 2, TILE - 2, 1, '#151d2d', 0.1);
-      }
-    }
+function placeSprite(sprite, width, height, x, y) {
+  sprite.position.set(x + width / 2, HEIGHT - (y + height / 2), sprite.position.z);
+}
+
+const textures = {
+  playerA: makeTexture(64, 80, (ctx) => {
+    ctx.fillStyle = '#274f43'; ctx.fillRect(22, 21, 22, 37);
+    ctx.fillStyle = '#f3c19f'; ctx.beginPath(); ctx.arc(33, 18, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#345e52'; ctx.beginPath(); ctx.arc(31, 12, 14, Math.PI, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#e7765a'; ctx.fillRect(10, 29, 25, 7); ctx.fillRect(10, 35, 10, 12);
+    ctx.fillStyle = '#d9b45a'; ctx.fillRect(22, 54, 8, 18); ctx.fillRect(36, 54, 8, 16);
+    ctx.fillStyle = '#f7e8c7'; ctx.fillRect(19, 70, 13, 4); ctx.fillRect(35, 68, 13, 4);
+    ctx.fillStyle = '#203b35'; ctx.fillRect(27, 18, 3, 3); ctx.fillRect(39, 18, 3, 3);
+  }),
+  playerB: makeTexture(64, 80, (ctx) => {
+    ctx.fillStyle = '#274f43'; ctx.fillRect(22, 21, 22, 37);
+    ctx.fillStyle = '#f3c19f'; ctx.beginPath(); ctx.arc(33, 18, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#345e52'; ctx.beginPath(); ctx.arc(31, 12, 14, Math.PI, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#e7765a'; ctx.fillRect(10, 29, 25, 7); ctx.fillRect(10, 35, 10, 12);
+    ctx.fillStyle = '#d9b45a'; ctx.fillRect(20, 54, 8, 16); ctx.fillRect(38, 54, 8, 18);
+    ctx.fillStyle = '#f7e8c7'; ctx.fillRect(16, 68, 14, 4); ctx.fillRect(35, 70, 14, 4);
+    ctx.fillStyle = '#203b35'; ctx.fillRect(27, 18, 3, 3); ctx.fillRect(39, 18, 3, 3);
+  }),
+  cloud: makeTexture(150, 54, (ctx) => {
+    ctx.fillStyle = 'rgba(255, 252, 231, 0.72)';
+    ctx.beginPath(); ctx.arc(45, 32, 22, 0, Math.PI * 2); ctx.arc(73, 24, 30, 0, Math.PI * 2); ctx.arc(105, 31, 23, 0, Math.PI * 2); ctx.fill(); ctx.fillRect(34, 31, 84, 18);
+  }),
+  mountain: makeTexture(340, 170, (ctx, width, height) => {
+    ctx.fillStyle = '#70978a'; ctx.beginPath(); ctx.moveTo(0, height); ctx.lineTo(0, 112); ctx.lineTo(82, 45); ctx.lineTo(142, 99); ctx.lineTo(216, 28); ctx.lineTo(340, 116); ctx.lineTo(340, height); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(245, 235, 203, 0.36)'; ctx.beginPath(); ctx.moveTo(82, 45); ctx.lineTo(107, 67); ctx.lineTo(76, 63); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(216, 28); ctx.lineTo(248, 52); ctx.lineTo(203, 47); ctx.closePath(); ctx.fill();
+  }),
+  tree: makeTexture(110, 170, (ctx) => {
+    ctx.fillStyle = '#805f49'; ctx.fillRect(47, 73, 18, 93);
+    ctx.fillStyle = '#416e58';
+    [[28, 70, 28], [58, 56, 34], [80, 82, 25], [46, 29, 26], [20, 102, 25]].forEach(([x, y, r]) => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); });
+    ctx.fillStyle = '#5d8b62';
+    [[38, 45, 16], [68, 73, 18], [18, 89, 14]].forEach(([x, y, r]) => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); });
+    ctx.fillStyle = '#f3bb58'; ctx.fillRect(36, 89, 5, 5); ctx.fillRect(70, 50, 4, 4);
+  }),
+  sun: makeTexture(80, 80, (ctx) => {
+    ctx.fillStyle = 'rgba(255, 227, 142, 0.24)'; ctx.beginPath(); ctx.arc(40, 40, 35, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#f8cf72'; ctx.beginPath(); ctx.arc(40, 40, 22, 0, Math.PI * 2); ctx.fill();
+  }),
+  star: makeTexture(28, 28, (ctx) => {
+    ctx.fillStyle = '#ffe285'; ctx.beginPath();
+    for (let i = 0; i < 10; i += 1) { const angle = -Math.PI / 2 + (i * Math.PI) / 5; const radius = i % 2 === 0 ? 12 : 5; const x = 14 + Math.cos(angle) * radius; const y = 14 + Math.sin(angle) * radius; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
+    ctx.closePath(); ctx.fill(); ctx.fillStyle = '#fff8c9'; ctx.fillRect(12, 10, 4, 8);
+  }),
+  log: makeTexture(70, 40, (ctx) => {
+    ctx.fillStyle = '#845b43'; ctx.fillRect(8, 12, 54, 20); ctx.fillStyle = '#a67550'; ctx.beginPath(); ctx.arc(10, 22, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#d6a56d'; ctx.beginPath(); ctx.arc(9, 22, 6, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#527b54'; ctx.fillRect(28, 8, 6, 6); ctx.fillRect(46, 26, 6, 6);
+  }),
+  branch: makeTexture(90, 48, (ctx) => {
+    ctx.strokeStyle = '#795541'; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(5, 31); ctx.quadraticCurveTo(36, 14, 84, 24); ctx.stroke();
+    ctx.fillStyle = '#4e7c5a'; [[25, 15, 11], [49, 10, 13], [71, 19, 10]].forEach(([x, y, r]) => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); });
+  }),
+};
+
+function spawnParticle(x, y, color, count = 5) {
+  for (let i = 0; i < count; i += 1) {
+    const size = 2 + Math.random() * 3;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ color, transparent: true }));
+    mesh.position.set(x, HEIGHT - y, 5); world.add(mesh);
+    state.particles.push({ mesh, life: 0.4 + Math.random() * 0.25, vx: (Math.random() - 0.5) * 70, vy: (Math.random() - 0.5) * 80 });
   }
-  rect(0, 0, VIRTUAL_WIDTH, 6, '#090e1a', 0.2);
-  rect(0, VIRTUAL_HEIGHT - 6, VIRTUAL_WIDTH, 6, '#090e1a', 0.2);
-  rect(0, 0, 6, VIRTUAL_HEIGHT, '#090e1a', 0.2);
-  rect(VIRTUAL_WIDTH - 6, 0, 6, VIRTUAL_HEIGHT, '#090e1a', 0.2);
 }
 
-function createExit() {
-  const sprite = createSprite(textures.exit, 28, 28, 426, 50, 2);
-  state.exit = { x: 438, y: 64, sprite, pulse: 0 };
+function buildScene() {
+  rect(0, 0, WIDTH, HEIGHT, '#a4d4cb', -5); rect(0, 0, WIDTH, 200, '#a9d8d0', -4); rect(0, 200, WIDTH, 86, '#84b47c', -3);
+  rect(0, GROUND_Y, WIDTH, HEIGHT - GROUND_Y, '#7f9e61', -2); rect(0, GROUND_Y, WIDTH, 6, '#d8d47a', -1); rect(0, GROUND_Y + 6, WIDTH, 7, '#9b714e', -1); rect(0, GROUND_Y + 13, WIDTH, HEIGHT - GROUND_Y - 13, '#a77a53', -1);
+  createSprite(textures.sun, 80, 80, 492, 32, -3);
+
+  [[-50, 108, 0.035], [210, 84, 0.02], [480, 130, 0.03]].forEach(([x, y, rate]) => { const sprite = createSprite(textures.mountain, 340, 170, x, y, -2); state.parallax.push({ sprite, width: 340, height: 170, baseX: x, y, rate, wrap: 720 }); });
+  [[-80, 70, 0.06], [170, 52, 0.05], [430, 88, 0.07], [650, 42, 0.05]].forEach(([x, y, rate]) => { const sprite = createSprite(textures.cloud, 150, 54, x, y, -1); state.parallax.push({ sprite, width: 150, height: 54, baseX: x, y, rate, wrap: 850 }); });
+  [[-30, 132, 0.11], [85, 137, 0.14], [280, 126, 0.12], [455, 140, 0.13], [610, 119, 0.1]].forEach(([x, y, rate]) => { const sprite = createSprite(textures.tree, 110, 170, x, y, 0); state.parallax.push({ sprite, width: 110, height: 170, baseX: x, y, rate, wrap: 760 }); });
+
+  for (let i = 0; i < 14; i += 1) { const blade = rect(i * 56 + 8, GROUND_Y - 4, 3 + (i % 3), 10 + (i % 4) * 3, i % 2 ? '#537d58' : '#6b965d', 0); state.groundDetails.push({ mesh: blade, baseX: i * 56 + 8, width: 56 }); }
+  state.player.sprite = createSprite(textures.playerA, 32, 40, PLAYER_X - 16, state.player.y - 3, 4);
 }
 
-function spawnPlayer() {
-  state.player.sprite = createSprite(textures.player, 28, 28, state.player.x, state.player.y, 4);
+function updateParallax() {
+  state.parallax.forEach((item) => { const cycle = item.wrap; const x = ((item.baseX - state.distance * item.rate) % cycle + cycle) % cycle - item.width; placeSprite(item.sprite, item.width, item.height, x, item.y); });
+  state.groundDetails.forEach((item) => { const x = ((item.baseX - state.distance * 0.9) % (WIDTH + item.width) + WIDTH + item.width) % (WIDTH + item.width) - item.width; item.mesh.position.x = x + item.mesh.geometry.parameters.width / 2; });
 }
 
-function spawnEnemy(x, y, speed = 32) {
-  const sprite = createSprite(textures.enemy, 27, 27, x, y, 3);
-  state.enemies.push({ x, y, hp: 2, speed, hitCooldown: 0, flash: 0, sprite, alive: true });
+function spawnObstacle() {
+  const kind = Math.random() > 0.62 ? 'branch' : 'log';
+  const config = kind === 'branch' ? { width: 74, height: 40, y: 220, texture: textures.branch } : { width: 44, height: 25, y: 261, texture: textures.log };
+  const sprite = createSprite(config.texture, config.width, config.height, WIDTH + 12, config.y, 3);
+  state.obstacles.push({ x: WIDTH + 12, y: config.y, width: config.width, height: config.height, sprite, hit: false });
 }
 
-function spawnCoin(x, y) {
-  const sprite = createSprite(textures.coin, 16, 16, x, y, 2);
-  state.coinsOnMap.push({ x, y, sprite, phase: Math.random() * Math.PI * 2, collected: false });
+function spawnStar() {
+  const y = Math.random() > 0.5 ? 236 : 198;
+  const sprite = createSprite(textures.star, 22, 22, WIDTH + 12, y, 3);
+  state.collectibles.push({ x: WIDTH + 12, y, width: 22, height: 22, sprite, phase: Math.random() * Math.PI * 2, collected: false });
 }
 
-function initGame() {
-  buildMap();
-  createExit();
-  spawnPlayer();
-  spawnEnemy(184, 67, 29);
-  spawnEnemy(304, 190, 31);
-  spawnEnemy(394, 218, 33);
-  spawnCoin(122, 57);
-  spawnCoin(342, 61);
-  spawnCoin(386, 170);
-  syncHud();
-}
-
-function isBlocked(x, y, radius = 9) {
-  if (x < 16 + radius || x > VIRTUAL_WIDTH - 16 - radius || y < 14 + radius || y > VIRTUAL_HEIGHT - 14 - radius) return true;
-  const samples = [[-radius, -radius], [radius, -radius], [-radius, radius], [radius, radius]];
-  return samples.some(([dx, dy]) => {
-    const col = Math.floor((x + dx) / TILE);
-    const row = Math.floor((y + dy) / TILE);
-    return blockedCells.has(`${col},${row}`);
-  });
-}
-
-function moveEntity(entity, dx, dy, radius = 9) {
-  const nextX = entity.x + dx;
-  const nextY = entity.y + dy;
-  if (!isBlocked(nextX, entity.y, radius)) entity.x = nextX;
-  if (!isBlocked(entity.x, nextY, radius)) entity.y = nextY;
-}
-
-function faceForVector(dx, dy) {
-  if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 'right' : 'left';
-  return dy > 0 ? 'down' : 'up';
-}
-
-function directionVector() {
-  let dx = 0; let dy = 0;
-  if (state.keys.has('ArrowLeft') || state.keys.has('a')) dx -= 1;
-  if (state.keys.has('ArrowRight') || state.keys.has('d')) dx += 1;
-  if (state.keys.has('ArrowUp') || state.keys.has('w')) dy -= 1;
-  if (state.keys.has('ArrowDown') || state.keys.has('s')) dy += 1;
-  const length = Math.hypot(dx, dy) || 1;
-  return { dx: dx / length, dy: dy / length };
-}
-
-function facingVector() {
-  return { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }[state.player.facing];
-}
+function overlaps(a, b) { return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y; }
+function playerBox() { const height = state.player.sliding ? 23 : 36; return { x: PLAYER_X - 12, y: state.player.y + (state.player.sliding ? 13 : 0), width: 24, height }; }
 
 function startAudio() {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
   if (!AudioContextClass) return;
-  if (!window.__pixelAudio) window.__pixelAudio = new AudioContextClass();
-  if (window.__pixelAudio.state === 'suspended') window.__pixelAudio.resume();
+  if (!window.__forestAudio) window.__forestAudio = new AudioContextClass();
+  if (window.__forestAudio.state === 'suspended') window.__forestAudio.resume();
 }
 
-function beep(frequency, duration = 0.06, type = 'square', volume = 0.035) {
-  if (!window.__pixelAudio) return;
-  const audio = window.__pixelAudio;
-  const oscillator = audio.createOscillator();
-  const gain = audio.createGain();
-  oscillator.type = type;
-  oscillator.frequency.value = frequency;
-  gain.gain.setValueAtTime(volume, audio.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + duration);
-  oscillator.connect(gain).connect(audio.destination);
-  oscillator.start();
-  oscillator.stop(audio.currentTime + duration);
+function beep(frequency, duration = 0.07, type = 'sine', volume = 0.025) {
+  if (!window.__forestAudio) return;
+  const audio = window.__forestAudio; const oscillator = audio.createOscillator(); const gain = audio.createGain(); oscillator.type = type; oscillator.frequency.value = frequency;
+  gain.gain.setValueAtTime(volume, audio.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + duration); oscillator.connect(gain).connect(audio.destination); oscillator.start(); oscillator.stop(audio.currentTime + duration);
 }
 
-function attack() {
-  if (state.mode !== 'playing' || state.player.attackCooldown > 0) return;
-  startAudio();
-  state.player.attackCooldown = 0.34;
-  const [fx, fy] = facingVector();
-  const slash = new THREE.Mesh(new THREE.PlaneGeometry(18, 6), new THREE.MeshBasicMaterial({ color: '#f4c95d', transparent: true, opacity: 0.95 }));
-  slash.position.copy(screenPosition(state.player.x + fx * 18, state.player.y + fy * 18, 3.8));
-  slash.rotation.z = fx ? 0 : Math.PI / 2;
-  world.add(slash);
-  state.player.slash = slash;
-  setTimeout(() => { world.remove(slash); if (state.player.slash === slash) state.player.slash = null; }, 110);
-  beep(270, 0.08);
-  state.enemies.forEach((enemy) => {
-    if (!enemy.alive) return;
-    const dx = enemy.x - state.player.x;
-    const dy = enemy.y - state.player.y;
-    const distance = Math.hypot(dx, dy);
-    const facingDot = distance === 0 ? 1 : (dx * fx + dy * fy) / distance;
-    if (distance < 42 && facingDot > 0.35) {
-      enemy.hp -= 1;
-      enemy.flash = 0.16;
-      spawnBurst(enemy.x, enemy.y, '#f4c95d', 4);
-      beep(140, 0.1, 'sawtooth', 0.045);
-      if (enemy.hp <= 0) defeatEnemy(enemy);
-    }
-  });
-}
-
-function defeatEnemy(enemy) {
-  enemy.alive = false;
-  enemy.sprite.visible = false;
-  state.enemiesDefeated += 1;
-  state.score += 100;
-  spawnCoin(enemy.x, enemy.y);
-  spawnBurst(enemy.x, enemy.y, '#ff6f61', 9);
-  beep(82, 0.18, 'square', 0.05);
-  syncHud();
-}
-
-function spawnBurst(x, y, color, count) {
-  for (let i = 0; i < count; i += 1) {
-    const size = 2 + Math.random() * 3;
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ color, transparent: true }));
-    mesh.position.copy(screenPosition(x, y, 5));
-    world.add(mesh);
-    state.particles.push({ mesh, life: 0.35 + Math.random() * 0.2, vx: (Math.random() - 0.5) * 65, vy: (Math.random() - 0.5) * 65 });
-  }
-}
-
-function damagePlayer(amount) {
-  if (state.player.invulnerable > 0 || state.mode !== 'playing') return;
-  state.player.hp = Math.max(0, state.player.hp - amount);
-  state.player.invulnerable = 0.85;
-  spawnBurst(state.player.x, state.player.y, '#ff6f61', 6);
-  beep(95, 0.15, 'sawtooth', 0.06);
-  if (state.player.hp <= 0) finishRun(false);
-  syncHud();
-}
+function jump() { if (state.mode === 'playing') { startAudio(); state.jumpQueued = true; } }
 
 function updatePlayer(delta) {
-  const { dx, dy } = directionVector();
-  if (dx || dy) {
-    moveEntity(state.player, dx * state.player.speed * delta, dy * state.player.speed * delta, 9);
-    state.player.facing = faceForVector(dx, dy);
-  }
-  state.player.attackCooldown = Math.max(0, state.player.attackCooldown - delta);
+  state.player.sliding = state.keys.has('ArrowDown') || state.keys.has('s');
+  if (state.jumpQueued && state.player.grounded && !state.player.sliding) { state.player.vy = -420; state.player.grounded = false; spawnParticle(PLAYER_X, state.player.y + 35, '#f3bb58', 5); beep(390, 0.09, 'triangle', 0.03); }
+  state.jumpQueued = false; state.player.vy += 1050 * delta; state.player.y += state.player.vy * delta;
+  const playerHeight = 36;
+  if (state.player.y >= GROUND_Y - playerHeight) { state.player.y = GROUND_Y - playerHeight; state.player.vy = 0; state.player.grounded = true; }
   state.player.invulnerable = Math.max(0, state.player.invulnerable - delta);
-  state.player.sprite.position.copy(screenPosition(state.player.x, state.player.y + (state.player.invulnerable > 0 ? Math.sin(state.time * 30) * 2 : 0), 4));
-  state.player.sprite.material.opacity = state.player.invulnerable > 0 && Math.floor(state.time * 20) % 2 ? 0.35 : 1;
+  const animationFrame = Math.floor(state.time * 9) % 2;
+  if (animationFrame !== state.player.animationFrame) { state.player.animationFrame = animationFrame; state.player.sprite.material.map = animationFrame === 0 ? textures.playerA : textures.playerB; state.player.sprite.material.needsUpdate = true; }
+  const spriteHeight = state.player.sliding ? 27 : 40; placeSprite(state.player.sprite, 32, spriteHeight, PLAYER_X - 16, state.player.y - (state.player.sliding ? 2 : 4));
+  state.player.sprite.material.opacity = state.player.invulnerable > 0 && Math.floor(state.time * 18) % 2 ? 0.35 : 1;
 }
 
-function moveEnemyToward(enemy, dx, dy, distance, delta) {
-  const step = enemy.speed * delta;
-  const moveX = (dx / distance) * step;
-  const moveY = (dy / distance) * step;
-  const beforeX = enemy.x;
-  const beforeY = enemy.y;
-  moveEntity(enemy, moveX, moveY, 8);
-  if (enemy.x !== beforeX || enemy.y !== beforeY) return;
-
-  const alternatives = [
-    [Math.sign(dx) * step, 0],
-    [0, Math.sign(dy) * step],
-    [0, Math.sign(dx) * step],
-    [Math.sign(dy) * step, 0],
-  ];
-  for (const [alternativeX, alternativeY] of alternatives) {
-    const candidateX = enemy.x;
-    const candidateY = enemy.y;
-    moveEntity(enemy, alternativeX, alternativeY, 8);
-    if (enemy.x !== candidateX || enemy.y !== candidateY) break;
-  }
+function hitObstacle(obstacle) {
+  obstacle.hit = true; obstacle.sprite.visible = false; state.hp = Math.max(0, state.hp - 1); state.player.invulnerable = 1.05; spawnParticle(PLAYER_X, state.player.y + 18, '#e9785d', 9); beep(110, 0.14, 'sawtooth', 0.04); if (state.hp === 0) finishRun(false);
 }
 
-function updateEnemies(delta) {
-  state.enemies.forEach((enemy) => {
-    if (!enemy.alive) return;
-    enemy.hitCooldown = Math.max(0, enemy.hitCooldown - delta);
-    enemy.flash = Math.max(0, enemy.flash - delta);
-    const dx = state.player.x - enemy.x;
-    const dy = state.player.y - enemy.y;
-    const distance = Math.hypot(dx, dy);
-    if (distance > 24) moveEnemyToward(enemy, dx, dy, distance, delta);
-    if (distance < 21 && enemy.hitCooldown <= 0) { enemy.hitCooldown = 0.8; damagePlayer(12); }
-    enemy.sprite.position.copy(screenPosition(enemy.x, enemy.y + Math.sin(state.time * 6 + enemy.x) * 1.2, 3));
-    enemy.sprite.material.opacity = enemy.flash > 0 ? 0.35 : 1;
-  });
+function updateObstacles(delta) {
+  const player = playerBox();
+  state.obstacles = state.obstacles.filter((obstacle) => { obstacle.x -= state.speed * delta; placeSprite(obstacle.sprite, obstacle.width, obstacle.height, obstacle.x, obstacle.y); if (!obstacle.hit && state.player.invulnerable <= 0 && overlaps(player, obstacle)) hitObstacle(obstacle); if (obstacle.x < -obstacle.width - 20) { world.remove(obstacle.sprite); return false; } return true; });
 }
 
-function updateCoins(delta) {
-  state.coinsOnMap.forEach((coin) => {
-    if (coin.collected) return;
-    coin.phase += delta * 4;
-    coin.sprite.position.copy(screenPosition(coin.x, coin.y + Math.sin(coin.phase) * 2, 2));
-    if (Math.hypot(coin.x - state.player.x, coin.y - state.player.y) < 15) {
-      coin.collected = true;
-      coin.sprite.visible = false;
-      state.coins += 1;
-      state.score += 25;
-      spawnBurst(coin.x, coin.y, '#f4c95d', 6);
-      beep(620, 0.08, 'square', 0.04);
-      syncHud();
-    }
-  });
-}
-
-function getLiveEnemyCount() {
-  return state.enemies.filter((enemy) => enemy.alive).length;
-}
-
-function isExitUnlocked() {
-  return getLiveEnemyCount() === 0 && state.coins >= REQUIRED_CORES;
-}
-
-function updateExit(delta) {
-  const unlocked = isExitUnlocked();
-  state.exit.pulse += delta * 4;
-  state.exit.sprite.position.copy(screenPosition(state.exit.x, state.exit.y + Math.sin(state.exit.pulse) * 2, 2));
-  state.exit.sprite.material.opacity = unlocked ? 0.75 + Math.sin(state.exit.pulse) * 0.2 : 0.25;
-  if (unlocked && Math.hypot(state.exit.x - state.player.x, state.exit.y - state.player.y) < 22) finishRun(true);
+function updateCollectibles(delta) {
+  const player = playerBox();
+  state.collectibles = state.collectibles.filter((item) => { item.x -= state.speed * delta; item.phase += delta * 5; placeSprite(item.sprite, item.width, item.height, item.x, item.y + Math.sin(item.phase) * 4); if (!item.collected && overlaps(player, { x: item.x - 4, y: item.y - 4, width: item.width + 8, height: item.height + 8 })) { item.collected = true; item.sprite.visible = false; state.stars += 1; state.score += 50; spawnParticle(item.x + 10, item.y + 10, '#ffe285', 8); beep(760, 0.11, 'sine', 0.035); } if (item.x < -30) { world.remove(item.sprite); return false; } return true; });
 }
 
 function updateParticles(delta) {
-  state.particles = state.particles.filter((particle) => {
-    particle.life -= delta;
-    particle.mesh.position.x += particle.vx * delta;
-    particle.mesh.position.y += -particle.vy * delta;
-    particle.mesh.material.opacity = Math.max(0, particle.life * 3);
-    if (particle.life <= 0) { world.remove(particle.mesh); return false; }
-    return true;
-  });
+  state.particles = state.particles.filter((particle) => { particle.life -= delta; particle.mesh.position.x += particle.vx * delta; particle.mesh.position.y -= particle.vy * delta; particle.mesh.material.opacity = Math.max(0, particle.life * 2.6); if (particle.life <= 0) { world.remove(particle.mesh); return false; } return true; });
 }
 
 function finishRun(won) {
   if (state.mode !== 'playing') return;
-  state.mode = won ? 'won' : 'lost';
-  resultPanel.classList.remove('hidden');
-  resultKicker.textContent = won ? '行动完成' : '信号中断';
-  resultTitle.textContent = won ? '扇区已清除' : '行动失败';
-  resultCopy.textContent = won ? `出口已开启。你带回了 ${state.coins} 枚信号核心，得分 ${state.score}。` : '护盾耗尽。按 R 或点击按钮重新进入扇区。';
-  runState.textContent = won ? '扇区完成' : '行动结束';
-  document.querySelector('.run-dot').style.background = won ? '#65e6d0' : '#ff6f61';
-  beep(won ? 740 : 60, 0.28, 'square', 0.045);
+  state.mode = won ? 'won' : 'lost'; resultPanel.classList.remove('hidden'); resultKicker.textContent = won ? '旅程完成' : '风声停下'; resultTitle.textContent = won ? '抵达山谷' : '再试一次'; resultCopy.textContent = won ? `你跑过了林间小路，收集了 ${state.stars} 颗萤火，带着 ${state.score} 分抵达终点。` : '树根挡住了去路。调整节奏，再沿着风的方向出发。'; runState.textContent = won ? '旅程完成' : '需要重启'; document.querySelector('.run-dot').style.background = won ? '#f3bb58' : '#e9785d'; beep(won ? 620 : 70, 0.28, won ? 'sine' : 'sawtooth', 0.035);
 }
 
 function syncHud() {
-  const liveEnemies = getLiveEnemyCount();
-  const health = Math.round(state.player.hp);
-  healthFill.style.width = `${health}%`;
-  healthValue.textContent = String(health).padStart(3, '0');
-  coinValue.textContent = String(state.coins).padStart(3, '0');
-  threatValue.textContent = String(liveEnemies).padStart(2, '0');
-  missionStatus.textContent = liveEnemies ? '进行中' : '完成';
-  missionStatus.style.color = liveEnemies ? 'var(--cyan)' : 'var(--yellow)';
-  coinStatus.textContent = `${state.coins} / ${REQUIRED_CORES}`;
-  const coresMissing = Math.max(0, REQUIRED_CORES - state.coins);
-  exitStatus.textContent = liveEnemies ? '先清敌人' : coresMissing ? `还差 ${coresMissing}` : '开放';
-  exitStatus.classList.toggle('locked', !isExitUnlocked());
+  const progress = Math.min(100, (state.distance / RUN_LENGTH) * 100); healthFill.style.width = `${(state.hp / 3) * 100}%`; healthValue.textContent = String(state.hp); distanceValue.textContent = `${String(Math.floor(state.distance)).padStart(3, '0')}m`; distanceFill.style.width = `${progress}%`; starValue.textContent = String(state.stars).padStart(3, '0'); missionStatus.textContent = state.distance >= RUN_LENGTH ? '完成' : '进行中'; missionStatus.style.color = state.distance >= RUN_LENGTH ? 'var(--sun)' : 'var(--forest)'; starStatus.textContent = `${Math.min(state.stars, STAR_TARGET)} / ${STAR_TARGET}`; exitStatus.textContent = `${Math.floor(progress)}%`;
 }
 
-function restart() {
-  window.location.reload();
+function updateGame(delta) {
+  state.time += delta; state.speed = Math.min(305, 178 + state.distance * 0.045); state.distance += state.speed * delta; state.score += Math.floor(state.speed * delta * 0.05); state.spawnTimer -= delta; state.starTimer -= delta;
+  if (state.spawnTimer <= 0) { spawnObstacle(); state.spawnTimer = Math.max(0.72, 1.14 - state.distance / 6200) + Math.random() * 0.35; }
+  if (state.starTimer <= 0) { spawnStar(); state.starTimer = 0.65 + Math.random() * 0.75; }
+  updatePlayer(delta); updateObstacles(delta); updateCollectibles(delta); updateParticles(delta); updateParallax(); syncHud(); if (state.distance >= RUN_LENGTH) finishRun(true);
 }
 
-function frame() {
-  const delta = Math.min(clock.getDelta(), 0.05);
-  state.time += delta;
-  if (state.mode === 'playing') {
-    updatePlayer(delta);
-    updateEnemies(delta);
-    updateCoins(delta);
-    updateExit(delta);
-    updateParticles(delta);
-  }
-  renderer.render(scene, camera);
-  requestAnimationFrame(frame);
-}
+function frame() { const delta = Math.min(clock.getDelta(), 0.05); if (state.mode === 'playing') updateGame(delta); renderer.render(scene, camera); requestAnimationFrame(frame); }
+function normalizeKey(key) { return key.length === 1 ? key.toLowerCase() : key; }
 
-window.addEventListener('keydown', (event) => {
-  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'w', 'a', 's', 'd'].includes(key)) event.preventDefault();
-  if (key === ' ') attack();
-  if (key === 'r' && state.mode !== 'playing') restart();
-  state.keys.add(key);
-  startAudio();
-});
-
-window.addEventListener('keyup', (event) => {
-  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
-  state.keys.delete(key);
-});
-
+window.addEventListener('keydown', (event) => { const key = normalizeKey(event.key); if (['ArrowUp', 'ArrowDown', ' ', 'w', 's'].includes(key)) event.preventDefault(); if (!event.repeat && [' ', 'ArrowUp', 'w'].includes(key)) jump(); if (key === 'r' && state.mode !== 'playing') window.location.reload(); state.keys.add(key); startAudio(); });
+window.addEventListener('keyup', (event) => state.keys.delete(normalizeKey(event.key)));
 window.addEventListener('blur', () => state.keys.clear());
+document.querySelector('#restart-button').addEventListener('click', () => window.location.reload());
 
-document.querySelector('#restart-button').addEventListener('click', restart);
-document.querySelector('#touch-attack').addEventListener('pointerdown', (event) => { event.preventDefault(); attack(); });
-document.querySelectorAll('.control-button').forEach((button) => {
-  const direction = button.dataset.dir;
-  const keys = { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight' };
-  const key = keys[direction];
-  const press = (event) => { event.preventDefault(); state.keys.add(key); startAudio(); };
-  const release = (event) => { event.preventDefault(); state.keys.delete(key); };
-  button.addEventListener('pointerdown', press);
-  button.addEventListener('pointerup', release);
-  button.addEventListener('pointerleave', release);
-  button.addEventListener('pointercancel', release);
-});
+function bindTouchButton(button, action) {
+  const press = (event) => { event.preventDefault(); button.setPointerCapture?.(event.pointerId); if (action === 'jump') jump(); if (action === 'slide') { startAudio(); state.keys.add('ArrowDown'); } };
+  const release = (event) => { event.preventDefault(); state.keys.delete('ArrowDown'); };
+  button.addEventListener('pointerdown', press); button.addEventListener('pointerup', release); button.addEventListener('pointercancel', release); button.addEventListener('pointerleave', release);
+}
 
-initGame();
+bindTouchButton(document.querySelector('#touch-jump'), 'jump');
+bindTouchButton(document.querySelector('#touch-slide'), 'slide');
+
+buildScene();
+syncHud();
 frame();
