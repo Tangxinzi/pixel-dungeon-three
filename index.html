@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b0f1a" />
+    <title>Dungeon 01 // Pixel Protocol</title>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="game-column" aria-label="像素地牢游戏">
+        <div class="game-header">
+          <div>
+            <p class="eyebrow">SECTOR 01 / NIGHT SHIFT</p>
+            <h1>DUNGEON <span>//</span> 01</h1>
+          </div>
+          <div class="run-chip"><span class="run-dot"></span><span id="run-state">RUN ACTIVE</span></div>
+        </div>
+
+        <div id="game-wrap" class="game-wrap">
+          <canvas id="game-canvas" aria-label="像素地牢游戏画布"></canvas>
+          <div class="screen-vignette"></div>
+          <div id="result-panel" class="result-panel hidden" role="status" aria-live="polite">
+            <p class="result-kicker" id="result-kicker">RUN COMPLETE</p>
+            <h2 id="result-title">SECTOR CLEARED</h2>
+            <p id="result-copy">所有敌人已清除。出口已经解锁。</p>
+            <button id="restart-button" class="primary-button" type="button">RESTART RUN <span>↵</span></button>
+          </div>
+          <div class="game-hint">MOVE <b>WASD</b> / <b>ARROWS</b><span></span>ATTACK <b>SPACE</b></div>
+        </div>
+
+        <div class="touch-controls" aria-label="触控操作">
+          <div class="d-pad">
+            <button class="control-button up" data-dir="up" aria-label="向上移动"></button>
+            <button class="control-button left" data-dir="left" aria-label="向左移动"></button>
+            <button class="control-button down" data-dir="down" aria-label="向下移动"></button>
+            <button class="control-button right" data-dir="right" aria-label="向右移动"></button>
+          </div>
+          <button id="touch-attack" class="attack-button" type="button" aria-label="攻击"><span class="attack-mark">+</span><span>ATTACK</span></button>
+        </div>
+      </section>
+
+      <aside class="side-panel" aria-label="游戏信息">
+        <div class="panel-block status-block">
+          <div class="section-label"><span>PLAYER STATUS</span><span class="section-code">00A</span></div>
+          <div class="health-row">
+            <div class="health-icon">+</div>
+            <div class="health-track"><div id="health-fill" class="health-fill"></div></div>
+            <strong id="health-value">100</strong>
+          </div>
+          <div class="stat-grid">
+            <div><span>COINS</span><strong id="coin-value">000</strong></div>
+            <div><span>THREAT</span><strong id="threat-value">03</strong></div>
+          </div>
+        </div>
+
+        <div class="panel-block objective-block">
+          <div class="section-label"><span>MISSION LOG</span><span class="section-code">01</span></div>
+          <div class="mission-line"><span class="mission-index">01</span><p>Clear the sector.</p><span id="mission-status" class="mission-status">OPEN</span></div>
+          <div class="mission-line"><span class="mission-index">02</span><p>Collect signal cores.</p><span id="coin-status" class="mission-status">0 / 3</span></div>
+          <div class="mission-line"><span class="mission-index">03</span><p>Reach the exit.</p><span id="exit-status" class="mission-status locked">LOCKED</span></div>
+        </div>
+
+        <div class="panel-block controls-block">
+          <div class="section-label"><span>INPUT MAP</span><span class="section-code">KEYS</span></div>
+          <div class="input-row"><span class="keycap">W</span><span class="keycap">A</span><span class="keycap">S</span><span class="keycap">D</span><span>MOVE</span></div>
+          <div class="input-row"><span class="keycap wide">SPACE</span><span>ATTACK / OPEN</span></div>
+          <div class="input-row muted"><span class="keycap">R</span><span>RESTART AFTER RUN</span></div>
+        </div>
+
+        <div class="panel-footer"><span>BUILD 1.0.0</span><span>THREE.JS / PIXEL MODE</span></div>
+      </aside>
+    </main>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.180.0/build/three.module.js"
+        }
+      }
+    </script>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
